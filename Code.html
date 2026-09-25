@@ -1,0 +1,203 @@
+
+
+
+<head>
+  ...
+  <style>
+
+    /* ==========================================================================
+       ESTRELLA - ANIMACIÓN CINEMATOGRÁFICA DE ENTRADA
+       Empieza pegada a la cámara (zoom enorme) y vuela hacia el fondo
+       ========================================================================== */
+
+    /* Contenedor fijo que cubre TODA la pantalla durante la animación */
+    .star-cinema-wrapper {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      pointer-events: none;
+      animation: wrapperFade 3.2s ease forwards;
+    }
+
+    @keyframes wrapperFade {
+      0% {
+        pointer-events: all;
+      }
+
+      90% {
+        pointer-events: none;
+      }
+
+      100% {
+        pointer-events: none;
+      }
+    }
+
+    /* La estrella - usa CSS Motion Path para seguir la curva S sin ninguna esquina */
+    .star-cinema {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 130px;
+      height: 130px;
+      /* El punto de anclaje es el centro del elemento (130/2 = 65px) */
+      offset-anchor: 65px 65px;
+      /* No gira para seguir la dirección del camino, se queda quieta */
+      offset-rotate: 0deg;
+      filter: drop-shadow(0 0 50px rgba(0, 119, 255, 0.8)) drop-shadow(0 0 100px rgba(0, 194, 255, 0.5));
+      /* linear() permite definir velocidad punto a punto:
+         0→25% del tiempo cubre el 45% del recorrido  → RÁPIDO al entrar
+         25%→75% del tiempo cubre solo el 10%          → LENTO en la barriga
+         75%→100% del tiempo cubre el 45% restante     → RÁPIDO al salir
+         (cubic-bezier no puede hacer esto: solo tiene 2 controles de velocidad) */
+      animation:
+        starMotion 3.5s cubic-bezier(0.16, 0.5, 0.3, 1) 0.1s forwards,
+        starScaleOpacity 3.5s cubic-bezier(0.16, 0.5, 0.3, 1) 0.1s forwards;
+      /* La offset-path (el camino S) se asigna por JavaScript según el tamaño real de pantalla */
+    }
+
+    /* Si hay traducción activa, saltamos la animación de la estrella */
+    html.translated .star-cinema-wrapper {
+      display: none;
+    }
+
+    /* Animación 1: recorre el camino S de principio a fin (el camino en sí lo define JS) */
+    @keyframes starMotion {
+      from {
+        offset-distance: 0%;
+      }
+
+      to {
+        offset-distance: 100%;
+      }
+    }
+
+    /* Animación 2: escala + opacidad — SOLO from→to, sin keyframes intermedios.
+       ease-out = encoge rápido al inicio (cuando la estrella es enorme y ocupa la
+       pantalla), luego se va frenando al llegar a la posición final.
+       Sin keyframes intermedios = sin ningún “trompiccón” posible. */
+    @keyframes starScaleOpacity {
+      from {
+        transform: scale(16);
+        opacity: 1;
+        filter: drop-shadow(0 0 80px rgba(0, 194, 255, 1)) drop-shadow(0 0 160px rgba(0, 119, 255, 0.8));
+      }
+
+      to {
+        transform: scale(1);
+        opacity: 0.18;
+        filter: drop-shadow(0 0 8px rgba(0, 119, 255, 0.2));
+      }
+    }
+
+  </style>
+</head>
+
+
+<body>
+...
+ <script>
+    // ==========================================================================
+    // ESTRELLAS - Motion Path: calcula la curva S según el tamaño real de pantalla
+    // Por qué hace falta JS: offset-path no acepta vw/vh dentro del path()
+    // así que medimos el viewport y construimos las coordenadas en píxeles reales.
+    // ==========================================================================
+    (function initStarPaths() {
+      var vw = window.innerWidth;
+      var vh = window.innerHeight;
+
+      // --- CURVA BASE (estrella principal) ---
+      //
+      // Los valores vienen de los sliders de Desmos:
+      //   P0=(4.284, 6.4)  P1=(5.02, 6.2)  P2=(6.72, 6.474)  P3=(4.18, 6.86)
+      //
+      // Conversión aplicada:
+      //   1) Invertir el recorrido (animación va P3→P0, igual que Desmos al revés)
+      //   2) Invertir eje Y (Desmos Y sube, SVG Y baja)
+      //   3) Escalar al viewport: Desmos x[4.18..6.72] → vw[5%..70%]
+      //                           Desmos y[6.2..6.86]  → vh[7%..35%]
+      //
+      // Para ajustar en el futuro: cambia los 4 pares de valores de Desmos
+      // y vuelve a ejecutar la misma conversión.
+      var sx = vw * 0.09, sy = vh * 0.13;   // START
+      var c1x = vw * 0.53, c1y = vh * 0.19;   // tirador de inicio
+      var c2x = vw * 0.23, c2y = vh * 0.54;   // tirador de fin
+      var ex = vw * 0.07, ey = vh * 0.33;    // END
+
+      function buildPath(ox, oy) {
+        // ox/oy: desplazamiento uniforme en píxeles aplicado a todos los puntos
+        return 'M ' + (sx + ox) + ',' + (sy + oy) +
+          ' C ' + (c1x + ox) + ',' + (c1y + oy) +
+          ' ' + (c2x + ox) + ',' + (c2y + oy) +
+          ' ' + (ex + ox) + ',' + (ey + oy);
+      }
+
+      // --- Estrella 1 (original) ---
+      var star1 = document.querySelector('.star-cinema');
+      if (star1) {
+        var path1 = buildPath(0, 0);
+        console.log('star1:', path1);
+        star1.style.offsetPath = "path('" + path1 + "')";
+      }
+
+      // ==========================================================================
+      // MODO DEBUG: dibuja los puntos de inicio/fin (rojo) y las líneas "tiradoras"
+      // hacia los puntos de control (naranja), para poder ajustar la curva a ojo.
+      // Actívalo añadiendo ?debug=1 a la URL.
+      // ==========================================================================
+      var DEBUG_PATH = window.location.search.includes('debug=1');
+
+      if (DEBUG_PATH) {
+        var svgNS = 'http://www.w3.org/2000/svg';
+        var debugSvg = document.createElementNS(svgNS, 'svg');
+        debugSvg.setAttribute('width', vw);
+        debugSvg.setAttribute('height', vh);
+        debugSvg.style.position = 'fixed';
+        debugSvg.style.top = '0';
+        debugSvg.style.left = '0';
+        debugSvg.style.zIndex = '99999';
+        debugSvg.style.pointerEvents = 'none';
+
+        function debugDot(x, y, color, radius) {
+          var c = document.createElementNS(svgNS, 'circle');
+          c.setAttribute('cx', x);
+          c.setAttribute('cy', y);
+          c.setAttribute('r', radius || 6);
+          c.setAttribute('fill', color);
+          debugSvg.appendChild(c);
+        }
+
+        function debugLine(x1, y1, x2, y2, color) {
+          var l = document.createElementNS(svgNS, 'line');
+          l.setAttribute('x1', x1);
+          l.setAttribute('y1', y1);
+          l.setAttribute('x2', x2);
+          l.setAttribute('y2', y2);
+          l.setAttribute('stroke', color);
+          l.setAttribute('stroke-width', 2);
+          l.setAttribute('stroke-dasharray', '6,4');
+          debugSvg.appendChild(l);
+        }
+
+        // Dibujar solo la curva base
+        var dp = document.createElementNS(svgNS, 'path');
+        dp.setAttribute('d', buildPath(0, 0));
+        dp.setAttribute('stroke', 'rgba(255,255,255,0.4)');
+        dp.setAttribute('stroke-width', 2);
+        dp.setAttribute('fill', 'none');
+        debugSvg.appendChild(dp);
+
+        // Tiradores de la curva base
+        debugLine(sx, sy, c1x, c1y, 'orange');
+        debugLine(ex, ey, c2x, c2y, 'orange');
+        debugDot(c1x, c1y, 'orange', 5);
+        debugDot(c2x, c2y, 'orange', 5);
+        debugDot(sx, sy, 'red', 7);
+        debugDot(ex, ey, 'red', 7);
+
+        document.body.appendChild(debugSvg);
+      }
+    })();
+
+  </script>
+</body>
